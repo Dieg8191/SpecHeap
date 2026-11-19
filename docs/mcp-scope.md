@@ -19,7 +19,7 @@ El MCP permite que modelos de IA consulten y modifiquen ese grafo. Los humanos u
 3. **Salida doble:** `structuredContent` (JSON validado con Pydantic) más un resumen corto en markdown.
 4. **Errores accionables:** código, causa y siguiente paso sugerido.
 5. **Concurrencia optimista:** cada ítem tiene `revision` (hash del contenido). `update_item` la exige para no pisar ediciones humanas.
-6. **Auditoría:** cada escritura se registra en `.specheap/log.jsonl` con `actor`, tool, id y timestamp.
+6. **Auditoría:** cada escritura se registra en la tabla `audit_log` de la base de datos (`.specheap/specheap.db`) con `actor`, acción, id y timestamp.
 7. **Las reglas viven en el core, no en el MCP** (ver sección 9).
 
 ## 3. Transporte y ejecución
@@ -117,11 +117,13 @@ Las reglas (matriz de permisos, `revision`, propagación de `stale`, auditoría)
 
 ```
 MCP tools ─┐
-CLI ───────┼─▶ Service(actor) ─▶ Storage (archivos .md + índice SQLite)
+CLI ───────┼─▶ Service(actor) ─▶ Storage (SQLite: items, links, audit_log)
 UI web ────┘
 ```
 
 Las tools MCP son una capa fina que llama a `Service(actor="agent")`. Esto garantiza que ningún cliente pueda saltarse las reglas y permite añadir nuevas interfaces sin duplicar lógica.
+
+Cada operación de escritura del servicio se ejecuta en **una transacción**: la lectura del estado, la comprobación de `revision`, la asignación del id y todos los cambios derivados (propagación de `stale`, estado `verified`, entradas de auditoría) se aplican juntos o no se aplica ninguno. Así dos agentes que escriben a la vez nunca reciben el mismo id, y solo uno gana una edición concurrente con la misma `revision`. Detalles en [storage.md](storage.md).
 
 ## 10. Fuera del MVP
 
@@ -129,7 +131,7 @@ Las tools MCP son una capa fina que llama a `Service(actor="agent")`. Esto garan
 - Import de resultados de tests (JUnit).
 - Búsqueda semántica.
 - Autenticación y multiusuario (HTTP).
-- Diff entre versiones y notificaciones.
+- Historial y diff entre versiones de un ítem (previsto como tabla `item_versions`, ver [storage.md](storage.md)) y notificaciones.
 
 ## 11. Evolución: code mode (v2)
 
@@ -150,7 +152,9 @@ Beneficios: menos tokens, menos viajes y descubrimiento progresivo de la API. En
 4. `update_item` con una `revision` obsoleta devuelve `REVISION_CONFLICT`.
 5. Con `--readonly` no se expone ninguna tool de escritura.
 6. Cada tool tiene test de contrato (entrada/salida) con el cliente MCP de prueba del SDK.
-7. Toda escritura aparece en `log.jsonl` con `actor: "agent"`.
+7. Toda escritura aparece en `audit_log` con `actor: "agent"`.
+8. Un fallo a mitad de una operación (p. ej. propagando `stale`) no deja cambios parciales.
+9. Escrituras concurrentes desde procesos distintos reciben ids únicos y secuenciales.
 
 ## 13. Decisiones abiertas
 

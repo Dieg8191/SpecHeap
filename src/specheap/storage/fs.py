@@ -90,6 +90,20 @@ class FileSystemStorage:
         with (self.data_dir / "log.jsonl").open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(line + "\n")
 
+    def has_items(self) -> bool:
+        """Whether the directory contains at least one markdown item."""
+        return any(
+            next((self.data_dir / directory).glob("*.md"), None) is not None
+            for directory in _DIRECTORIES.values()
+            if (self.data_dir / directory).is_dir()
+        )
+
+    def replace_log(self, entries: list[dict[str, Any]]) -> None:
+        """Overwrite the audit log (used by export so re-exporting never duplicates entries)."""
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        lines = [json.dumps(e, ensure_ascii=False, sort_keys=True) + "\n" for e in entries]
+        _atomic_write(self.data_dir / "log.jsonl", "".join(lines))
+
     def log_entries(self) -> list[dict[str, Any]]:
         path = self.data_dir / "log.jsonl"
         if not path.is_file():
