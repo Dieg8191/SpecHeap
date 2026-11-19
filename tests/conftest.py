@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -9,15 +10,31 @@ import pytest
 from specheap.core.models import Actor
 from specheap.core.ports import Storage
 from specheap.core.service import Service
-from specheap.storage import FileSystemStorage, MemoryStorage
+from specheap.storage import FileSystemStorage, MemoryStorage, SQLiteStorage
 
 
-@pytest.fixture(params=["memory", "fs"])
-def storage(request: pytest.FixtureRequest, tmp_path: Path) -> Storage:
-    """Run every storage-dependent test against both adapters."""
+@pytest.fixture(params=["memory", "fs", "sqlite"])
+def storage(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Storage]:
+    """Run every storage-dependent test against every adapter."""
     if request.param == "memory":
-        return MemoryStorage()
-    return FileSystemStorage(tmp_path)
+        yield MemoryStorage()
+    elif request.param == "fs":
+        yield FileSystemStorage(tmp_path)
+    else:
+        sqlite = SQLiteStorage(tmp_path / "specheap.db")
+        yield sqlite
+        sqlite.close()
+
+
+@pytest.fixture(params=["memory", "sqlite"])
+def atomic_storage(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Storage]:
+    """Adapters that guarantee atomic transactions (the file adapter does not)."""
+    if request.param == "memory":
+        yield MemoryStorage()
+    else:
+        sqlite = SQLiteStorage(tmp_path / "specheap.db")
+        yield sqlite
+        sqlite.close()
 
 
 @pytest.fixture

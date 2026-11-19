@@ -1,5 +1,10 @@
 """Filesystem storage: one markdown file per item, with YAML frontmatter.
 
+This is the original storage format. SQLite is now the default and only source of truth;
+this adapter remains as the engine behind ``specheap import`` (reading old workspaces) and
+``specheap export`` (writing a human-readable copy). It is not atomic: ``transaction()`` is a
+no-op, so do not use it to serve concurrent writers.
+
 Layout (relative to the project root)::
 
     .specheap/
@@ -10,7 +15,7 @@ Layout (relative to the project root)::
       verifications/VER-001.md
       log.jsonl
 
-Files are meant to be committed to git, so output is deterministic and human-readable.
+Output is deterministic and human-readable.
 """
 
 from __future__ import annotations
@@ -18,6 +23,8 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +34,7 @@ from pydantic import ValidationError
 from specheap.core.errors import ValidationFailedError
 from specheap.core.ids import parse_id
 from specheap.core.models import Item, ItemType
-from specheap.storage.memory import _next_number
+from specheap.storage.memory import next_number
 
 DATA_DIR_NAME = ".specheap"
 
@@ -75,13 +82,25 @@ class FileSystemStorage:
         return items
 
     def next_number(self, item_type: ItemType) -> int:
-        return _next_number(self.all(), item_type)
+        return next_number(self.all(), item_type)
 
     def append_log(self, entry: dict[str, Any]) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         line = json.dumps(entry, ensure_ascii=False, sort_keys=True)
         with (self.data_dir / "log.jsonl").open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(line + "\n")
+
+    def log_entries(self) -> list[dict[str, Any]]:
+        path = self.data_dir / "log.jsonl"
+        if not path.is_file():
+            return []
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return [json.loads(line) for line in lines if line.strip()]
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """No-op: files cannot be updated atomically, so writes are applied one by one."""
+        yield
 
     def _path(self, item_type: ItemType, item_id: str) -> Path:
         return self.data_dir / _DIRECTORIES[item_type] / f"{item_id}.md"

@@ -67,6 +67,12 @@ class ValidationFailedError(SpecHeapError):
     code = "VALIDATION_ERROR"
 
 
+class StorageError(SpecHeapError):
+    """The storage back end cannot be used (corrupt, locked or from a newer version)."""
+
+    code = "STORAGE_ERROR"
+
+
 class ReadonlyModeError(SpecHeapError):
     """A write was attempted while the server runs in read-only mode."""
 

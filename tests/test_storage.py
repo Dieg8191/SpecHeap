@@ -72,12 +72,115 @@ def test_save_overwrites(storage: Storage) -> None:
     assert len(storage.all()) == 1
 
 
-def test_append_log(storage: Storage, tmp_path: Path) -> None:
+def test_append_log(storage: Storage) -> None:
+    storage.append_log({"action": "a"})
+    storage.append_log({"action": "b", "id": "REQ-001", "extra": ["ñ", 1]})
+    assert storage.log_entries() == [
+        {"action": "a"},
+        {"action": "b", "id": "REQ-001", "extra": ["ñ", 1]},
+    ]
+
+
+def test_fs_log_is_one_json_line_per_entry(tmp_path: Path) -> None:
+    storage = FileSystemStorage(tmp_path)
     storage.append_log({"action": "a"})
     storage.append_log({"action": "b"})
-    if isinstance(storage, FileSystemStorage):
-        lines = (storage.data_dir / "log.jsonl").read_text(encoding="utf-8").splitlines()
-        assert len(lines) == 2 and '"action": "b"' in lines[1]
+    lines = (storage.data_dir / "log.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2 and '"action": "b"' in lines[1]
+
+
+def test_links_and_verification_fields_roundtrip(storage: Storage) -> None:
+    spec = Item.model_validate(
+        {
+            "id": "SPEC-001",
+            "type": ItemType.SPEC,
+            "title": "Counter",
+            "parent": "REQ-001",
+            "satisfies": ["REQ-003", "REQ-002"],  # Order is preserved.
+        }
+    )
+    ver = Item.model_validate(
+        {
+            "id": "VER-001",
+            "type": ItemType.VERIFICATION,
+            "title": "Lock test",
+            "parent": "REQ-001",
+            "verifies": ["SPEC-001", "REQ-002"],
+            "result": "fail",
+            "evidence": "expected 3, got 2",
+            "run_ref": "run-7",
+        }
+    )
+    storage.save(spec)
+    storage.save(ver)
+    assert storage.get("SPEC-001") == spec
+    assert storage.get("VER-001") == ver
+    assert sorted(storage.all(), key=lambda i: i.id) == [spec, ver]
+
+
+def test_removing_links_persists(storage: Storage) -> None:
+    spec = Item.model_validate(
+        {"id": "SPEC-001", "type": ItemType.SPEC, "title": "S", "parent": "REQ-001",
+         "satisfies": ["REQ-002"]}
+    )
+    storage.save(spec)
+    spec.satisfies.clear()
+    storage.save(spec)
+    fetched = storage.get("SPEC-001")
+    assert fetched is not None and fetched.satisfies == []
+
+
+# ------------------------------------------------------------ transactions
+
+
+def test_transaction_commits_on_success(atomic_storage: Storage) -> None:
+    with atomic_storage.transaction():
+        atomic_storage.save(make_req(1))
+        atomic_storage.append_log({"action": "create"})
+    assert atomic_storage.get("REQ-001") is not None
+    assert atomic_storage.log_entries() == [{"action": "create"}]
+
+
+def test_transaction_rolls_back_items_and_log_on_error(atomic_storage: Storage) -> None:
+    atomic_storage.save(make_req(1))
+    with pytest.raises(RuntimeError):
+        with atomic_storage.transaction():
+            atomic_storage.save(make_req(1, title="Changed"))
+            atomic_storage.save(make_req(2))
+            atomic_storage.append_log({"action": "lost"})
+            raise RuntimeError("boom")
+    original = atomic_storage.get("REQ-001")
+    assert original is not None and original.title == "Lock account after failed logins"
+    assert atomic_storage.get("REQ-002") is None
+    assert atomic_storage.log_entries() == []
+
+
+def test_nested_transactions_join_the_outer_one(atomic_storage: Storage) -> None:
+    with pytest.raises(RuntimeError):
+        with atomic_storage.transaction():
+            with atomic_storage.transaction():
+                atomic_storage.save(make_req(1))
+            atomic_storage.save(make_req(2))
+            raise RuntimeError("boom")
+    assert atomic_storage.all() == []
+
+
+def test_reads_inside_a_transaction_see_its_own_writes(atomic_storage: Storage) -> None:
+    with atomic_storage.transaction():
+        assert atomic_storage.next_number(ItemType.REQ) == 1
+        atomic_storage.save(make_req(1))
+        assert atomic_storage.next_number(ItemType.REQ) == 2
+        assert [i.id for i in atomic_storage.all()] == ["REQ-001"]
+
+
+def test_storage_is_usable_after_a_rolled_back_transaction(atomic_storage: Storage) -> None:
+    with pytest.raises(RuntimeError):
+        with atomic_storage.transaction():
+            atomic_storage.save(make_req(1))
+            raise RuntimeError("boom")
+    with atomic_storage.transaction():
+        atomic_storage.save(make_req(1))
+    assert atomic_storage.get("REQ-001") is not None
 
 
 def test_fs_layout_is_human_readable(tmp_path: Path) -> None:

@@ -7,8 +7,10 @@ CLI and web UI are thin layers on top of it.
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Concatenate, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -42,6 +44,25 @@ _REVIEWED = frozenset({Status.APPROVED, Status.IMPLEMENTED, Status.VERIFIED})
 _STALEABLE = frozenset({Status.PROPOSED, Status.APPROVED, Status.IMPLEMENTED, Status.VERIFIED})
 
 _TYPE_ORDER = list(ItemType)
+
+def _atomic[**P, R](
+    method: Callable[Concatenate[Service, P], R],
+) -> Callable[Concatenate[Service, P], R]:
+    """Run a write operation as a single storage transaction.
+
+    The read-only check runs first so read-only services never take the write lock. Reading
+    the current state, checking the revision, allocating an identifier and every resulting
+    write (including stale propagation and audit entries) then happen under one lock: they
+    either all take effect or none does, and concurrent writers cannot interleave.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: Service, *args: P.args, **kwargs: P.kwargs) -> R:
+        self._require_writable()
+        with self._storage.transaction():
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 class Gaps(BaseModel):
@@ -207,6 +228,7 @@ class Service:
 
     # ----------------------------------------------------------------- writes
 
+    @_atomic
     def create_item(
         self,
         item_type: ItemType,
@@ -231,6 +253,7 @@ class Service:
         self._audit("create_item", item.id, parent=parent_id)
         return item
 
+    @_atomic
     def update_item(self, item_id: str, patch: dict[str, Any], expected_revision: str) -> Item:
         """Edit title/body using optimistic concurrency.
 
@@ -271,6 +294,7 @@ class Service:
         """Approve a proposed item. Reserved for human actors."""
         return self._transition(item_id, Status.APPROVED, "approve_item")
 
+    @_atomic
     def mark_implemented(self, item_id: str, evidence: str = "") -> Item:
         """Mark an approved requirement or spec as implemented."""
         item = self._require(item_id)
@@ -291,6 +315,7 @@ class Service:
         """Remove a previously created link."""
         return self._change_link(from_id, to_id, relation, add=False)
 
+    @_atomic
     def report_verification(
         self,
         item_id: str,
@@ -351,6 +376,7 @@ class Service:
                 field=field,
             ) from error
 
+    @_atomic
     def _transition(self, item_id: str, target: Status, action: str, **extra: Any) -> Item:
         self._require_writable()
         item = self._require(item_id)
@@ -361,6 +387,7 @@ class Service:
         self._audit(action, item_id, from_status=previous.value, to_status=target.value, **extra)
         return item
 
+    @_atomic
     def _change_link(self, from_id: str, to_id: str, relation: Relation, *, add: bool) -> Item:
         self._require_writable()
         source = self._require(from_id)

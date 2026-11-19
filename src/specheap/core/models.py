@@ -116,9 +116,12 @@ class Item(BaseModel):
     run_ref: str | None = None
 
     @model_validator(mode="after")
-    def _result_only_on_verifications(self) -> Item:
+    def _consistent(self) -> Item:
         if self.type is not ItemType.VERIFICATION and self.result is not None:
             raise ValueError("Only verifications can carry a result.")
+        id_type, _ = parse_id(self.id)
+        if id_type is not self.type:
+            raise ValueError(f"Identifier {self.id} does not belong to a {self.type.value}.")
         return self
 
     @field_validator("id")

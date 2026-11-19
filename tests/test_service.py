@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from specheap.core.errors import (
@@ -18,7 +16,6 @@ from specheap.core.errors import (
 from specheap.core.models import Actor, Item, ItemType, Status, VerificationResult
 from specheap.core.ports import Storage
 from specheap.core.service import Service
-from specheap.storage import FileSystemStorage, MemoryStorage
 
 
 def build_chain(svc: Service) -> dict[str, Item]:
@@ -333,13 +330,7 @@ def test_audit_log_records_actor_and_derived_changes(storage: Storage) -> None:
     approve(human, chain["spec"].id)
     agent.update_item("REQ-001", {"title": "Changed"}, human.get_item("REQ-001").revision)
 
-    if isinstance(storage, MemoryStorage):
-        entries = storage.log
-    else:
-        assert isinstance(storage, FileSystemStorage)
-        log_text = (storage.data_dir / "log.jsonl").read_text(encoding="utf-8")
-        entries = [json.loads(line) for line in log_text.splitlines()]
-    by_action = {e["action"]: e for e in entries}
+    by_action = {e["action"]: e for e in storage.log_entries()}
     assert by_action["update_item"]["actor"] == "agent"
     assert by_action["approve_item"]["actor"] == "human"
     assert by_action["mark_stale"]["actor"] == "system"
