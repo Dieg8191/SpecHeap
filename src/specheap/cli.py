@@ -36,6 +36,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_root(mcp)
     mcp.add_argument("--readonly", action="store_true", help="Expose read tools only.")
 
+    serve = sub.add_parser("serve", help="Run the local web UI.")
+    add_root(serve)
+    serve.add_argument("--host", default="127.0.0.1", help="Interface to bind (default: loopback).")
+    serve.add_argument("--port", type=int, default=8765, help="Port (default: 8765).")
+    serve.add_argument(
+        "--allowed-host",
+        action="append",
+        default=[],
+        help="Extra Host header value to accept (repeatable). Needed when exposing the UI.",
+    )
+
     approve = sub.add_parser("approve", help="Approve a proposed item (humans only).")
     add_root(approve)
     approve.add_argument("item_id", help="Item id, e.g. REQ-012.")
@@ -67,6 +78,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             service = Service(storage, Actor.AGENT, readonly=args.readonly)
             build_server(service).run(transport="stdio")
             return 0
+        if args.command == "serve":
+            return _serve(storage, args)
         service = Service(storage, Actor.HUMAN)
         if args.command == "approve":
             item = service.approve_item(args.item_id)
@@ -79,6 +92,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error [{error.code}]: {error.message}{hint}", file=sys.stderr)
         return 1
     return 2
+
+
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def _serve(storage: FileSystemStorage, args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from specheap.web import DEFAULT_ALLOWED_HOSTS, create_app
+
+    allowed = [*DEFAULT_ALLOWED_HOSTS, args.host, *args.allowed_host]
+    if args.host not in _LOOPBACK_HOSTS:
+        print(
+            f"warning: binding to {args.host} exposes the UI, including approval, to the network "
+            "without authentication.",
+            file=sys.stderr,
+        )
+    app = create_app(storage, allowed_hosts=sorted(set(allowed)))
+    print(f"SpecHeap UI running at http://{args.host}:{args.port} (Ctrl+C to stop)")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    return 0
 
 
 def _print_gaps(service: Service, scope: str | None) -> int:

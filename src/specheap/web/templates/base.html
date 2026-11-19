@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}SpecHeap{% endblock %}</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --card: #f6f8fa;
+    --accent: #0969da; --on-accent: #ffffff; --danger: #cf222e;
+    --draft: #59636e; --proposed: #9a6700; --approved: #0969da;
+    --implemented: #8250df; --verified: #1a7f37; --stale: #cf222e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #30363d; --card: #151b23;
+      --accent: #4493f8; --on-accent: #0d1117; --danger: #f85149;
+      --draft: #9198a1; --proposed: #d29922; --approved: #4493f8;
+      --implemented: #ab7df8; --verified: #3fb950; --stale: #f85149;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg); line-height: 1.5;
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header { border-bottom: 1px solid var(--line); background: var(--card); }
+  header .bar { max-width: 960px; margin: 0 auto; padding: 12px 16px; display: flex;
+    align-items: baseline; gap: 16px; }
+  header a.brand { font-weight: 700; font-size: 1.1rem; color: var(--fg); text-decoration: none; }
+  header .tag { color: var(--muted); font-size: .85rem; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  a { color: var(--accent); }
+  h1 { font-size: 1.5rem; margin: 0 0 8px; }
+  h2 { font-size: 1.05rem; margin: 32px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .muted { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .stat .n { font-size: 1.6rem; font-weight: 700; }
+  .stat .l { color: var(--muted); font-size: .85rem; }
+  .badge { display: inline-block; font-size: .75rem; font-weight: 600; padding: 1px 8px;
+    border: 1px solid currentColor; border-radius: 999px; vertical-align: middle; }
+  .s-draft { color: var(--draft); } .s-proposed { color: var(--proposed); }
+  .s-approved { color: var(--approved); } .s-implemented { color: var(--implemented); }
+  .s-verified { color: var(--verified); } .s-stale { color: var(--stale); }
+  .gap { color: var(--danger); border-color: var(--danger); }
+  .type { text-transform: uppercase; font-size: .7rem; letter-spacing: .04em; color: var(--muted); }
+  ul.tree, ul.tree ul { list-style: none; margin: 0; padding-left: 20px; border-left: 1px solid var(--line); }
+  ul.tree { padding-left: 0; border-left: none; }
+  ul.tree li { margin: 6px 0; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  ul.plain li .grow { flex: 1; min-width: 0; }
+  .body { white-space: pre-wrap; background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px; font-family: ui-monospace, Consolas, monospace; font-size: .9rem; }
+  .crumbs { color: var(--muted); font-size: .85rem; margin-bottom: 12px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 20px; color: var(--muted); font-size: .85rem; margin: 8px 0 16px; }
+  .actions { display: flex; gap: 8px; margin: 16px 0; }
+  form { margin: 0; display: inline; }
+  button { font: inherit; cursor: pointer; border-radius: 6px; padding: 5px 14px;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .error { border: 1px solid var(--danger); border-left-width: 4px; border-radius: 6px;
+    padding: 10px 14px; margin: 0 0 16px; background: var(--card); }
+  .error strong { color: var(--danger); }
+  .empty { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <a class="brand" href="/">SpecHeap</a>
+    <span class="tag">Epic &rarr; Feature &rarr; Req &rarr; Spec &rarr; Verification</span>
+  </div>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

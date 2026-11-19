@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, action_form, item_link, tree %}
+{% block title %}SpecHeap{% endblock %}
+{% block content %}
+
+<h1>Overview</h1>
+<div class="stats">
+  <div class="stat"><div class="n">{{ overview.total_items }}</div><div class="l">items</div></div>
+  <div class="stat"><div class="n">{{ overview.coverage_percent }}%</div>
+    <div class="l">requirements covered (spec + verification)</div></div>
+  <div class="stat"><div class="n">{{ overview.gaps }}</div><div class="l">open gaps</div></div>
+  <div class="stat"><div class="n">{{ overview.stale }}</div><div class="l">stale</div></div>
+</div>
+
+<h2>Awaiting your review ({{ review|length }})</h2>
+{% if review %}
+<ul class="plain">
+  {% for item in review %}
+  <li>
+    <span class="type">{{ item.type.value }}</span>
+    <span class="grow">{{ item_link(item) }}</span>
+    {{ badge(item.status) }}
+    {% for action in actions_for(item) %}{{ action_form(item, action, csrf_token, "home") }}{% endfor %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty">Nothing to review. Items proposed by agents appear here.</p>
+{% endif %}
+
+<h2>Gaps ({{ gaps.total }})</h2>
+{% set groups = [
+  ("Requirements without a spec", gaps.reqs_without_spec),
+  ("Requirements without a verification", gaps.reqs_without_verification),
+  ("Specs without a verification", gaps.specs_without_verification),
+  ("Failed verifications", gaps.failed_verifications),
+  ("Stale items", gaps.stale),
+] %}
+{% if gaps.total %}
+  {% for title, ids in groups if ids %}
+  <p><strong>{{ title }}:</strong>
+    {% for item_id in ids %}<a href="/items/{{ item_id }}">{{ item_id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endfor %}
+{% else %}
+<p class="empty">No traceability gaps.</p>
+{% endif %}
+
+<h2>Traceability tree</h2>
+{% if roots %}{{ tree(roots) }}{% else %}
+<p class="empty">No items yet. Run <code>specheap mcp</code> and let an agent create the first epic.</p>
+{% endif %}
+
+{% endblock %}

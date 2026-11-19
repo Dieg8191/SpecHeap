@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, action_form, item_link %}
+{% block title %}{{ item.id }} · SpecHeap{% endblock %}
+{% block content %}
+
+<div class="crumbs">
+  <a href="/">Overview</a>
+  {% for ancestor in ancestors %} / <a href="/items/{{ ancestor.id }}">{{ ancestor.id }}</a>{% endfor %}
+</div>
+
+{% if error %}
+<div class="error" role="alert">
+  <strong>{{ error.code }}</strong>: {{ error.message }}
+  {% if error.hint %}<div class="muted">{{ error.hint }}</div>{% endif %}
+</div>
+{% endif %}
+
+<span class="type">{{ item.type.value }}</span>
+<h1>{{ item.id }}: {{ item.title }} {{ badge(item.status) }}</h1>
+<div class="meta">
+  <span>parent: {% if item.parent %}<a href="/items/{{ item.parent }}">{{ item.parent }}</a>{% else %}none{% endif %}</span>
+  <span>revision: <code>{{ item.revision }}</code></span>
+</div>
+
+{% if actions %}
+<div class="actions">
+  {% for action in actions %}{{ action_form(item, action, csrf_token) }}{% endfor %}
+</div>
+{% endif %}
+
+<h2>Description</h2>
+{% if item.body %}<div class="body">{{ item.body }}</div>{% else %}<p class="empty">No description.</p>{% endif %}
+
+{% if item.type.value == "verification" %}
+<h2>Latest result</h2>
+{% if item.result %}
+<p><span class="badge {{ 's-verified' if item.result.value == 'pass' else 'gap' if item.result.value == 'fail' else 's-draft' }}">{{ item.result.value }}</span>
+  {% if item.run_ref %}<span class="muted">run: {{ item.run_ref }}</span>{% endif %}</p>
+{% if item.evidence %}<div class="body">{{ item.evidence }}</div>{% endif %}
+{% else %}<p class="empty">No result reported yet.</p>{% endif %}
+{% endif %}
+
+{% if targets %}
+<h2>Links to</h2>
+<ul class="plain">
+  {% for target in targets %}
+  <li><span class="type">{{ target.type.value }}</span><span class="grow">{{ item_link(target) }}</span>{{ badge(target.status) }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Children ({{ children|length }})</h2>
+{% if children %}
+<ul class="plain">
+  {% for child in children %}
+  <li><span class="type">{{ child.type.value }}</span><span class="grow">{{ item_link(child) }}</span>{{ badge(child.status) }}</li>
+  {% endfor %}
+</ul>
+{% else %}<p class="empty">No children.</p>{% endif %}
+
+{% if linked %}
+<h2>Downstream items</h2>
+<ul class="plain">
+  {% for other in linked %}
+  <li><span class="type">{{ other.type.value }}</span><span class="grow">{{ item_link(other) }}</span>{{ badge(other.status) }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% endblock %}

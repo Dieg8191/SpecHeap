@@ -22,6 +22,31 @@ def test_init_creates_layout(tmp_path: Path) -> None:
     assert (tmp_path / ".specheap" / "reqs").is_dir()
 
 
+def test_serve_starts_uvicorn_on_loopback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import uvicorn
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: calls.append(kwargs))
+    main(["init", "--root", str(tmp_path)])
+
+    assert main(["serve", "--root", str(tmp_path), "--port", "9999"]) == 0
+    assert calls[0]["host"] == "127.0.0.1" and calls[0]["port"] == 9999
+    assert "warning" not in capsys.readouterr().err
+
+
+def test_serve_warns_when_exposed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: None)
+    main(["init", "--root", str(tmp_path)])
+    main(["serve", "--root", str(tmp_path), "--host", "0.0.0.0"])
+    assert "without authentication" in capsys.readouterr().err
+
+
 def test_approve_flow_and_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     main(["init", "--root", str(tmp_path)])
     storage = FileSystemStorage(tmp_path)
