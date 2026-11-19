@@ -252,6 +252,61 @@ def test_list_items_filters_and_orders(human: Service) -> None:
     assert human.list_items(status=Status.APPROVED) == []
 
 
+# ------------------------------------------------- context, trace, next work
+
+
+def test_get_context_and_depth(human: Service) -> None:
+    build_chain(human)
+    ctx = human.get_context("REQ-001")
+    assert [i.id for i in ctx.ancestors] == ["EPIC-001", "FEAT-001"]
+    assert [i.id for i in ctx.descendants] == ["SPEC-001", "VER-001"]
+
+    top = human.get_context("EPIC-001", depth=1)
+    assert [i.id for i in top.descendants] == ["FEAT-001"]
+    assert len(human.get_context("EPIC-001").descendants) == 4
+
+
+def test_trace_directions(human: Service) -> None:
+    build_chain(human)
+    both = human.trace("SPEC-001")
+    assert {i.id for i in both.upstream} == {"REQ-001", "FEAT-001", "EPIC-001"}
+    assert both.downstream == []
+    assert human.trace("REQ-001", "down").upstream == []
+    assert {i.id for i in human.trace("REQ-001", "up").upstream} == {"FEAT-001", "EPIC-001"}
+    assert human.trace("REQ-001", "up").downstream == []
+
+
+def test_trace_follows_links(human: Service) -> None:
+    build_chain(human)
+    other = human.create_item(ItemType.REQ, "Other", parent_id="FEAT-001")
+    human.link_items("SPEC-001", other.id, "satisfies")
+    assert other.id in {i.id for i in human.trace("SPEC-001", "up").upstream}
+    assert "SPEC-001" in {i.id for i in human.trace(other.id, "down").downstream}
+
+
+def test_next_work_requires_ready_parent(human: Service) -> None:
+    build_chain(human)
+    assert human.next_work() == []
+    approve(human, "SPEC-001")  # Parent req is still a draft: spec is not ready.
+    assert human.next_work() == []
+    approve(human, "REQ-001")
+    assert [i.id for i in human.next_work()] == ["REQ-001", "SPEC-001"]
+    assert [i.id for i in human.next_work(limit=1)] == ["REQ-001"]
+    human.mark_implemented("REQ-001")
+    assert [i.id for i in human.next_work()] == ["SPEC-001"]
+
+
+def test_overview_coverage(human: Service) -> None:
+    build_chain(human)
+    human.create_item(ItemType.REQ, "Uncovered", parent_id="FEAT-001")
+    overview = human.get_overview()
+    assert overview.total_items == 6
+    assert overview.by_type["req"] == 2
+    assert overview.by_status["draft"] == 6
+    assert overview.coverage_percent == 50.0
+    assert overview.gaps > 0 and overview.stale == 0
+
+
 # -------------------------------------------------------- readonly + audit
 
 

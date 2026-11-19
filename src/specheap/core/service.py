@@ -58,6 +58,34 @@ class Gaps(BaseModel):
         return sum(len(v) for v in self.model_dump().values())
 
 
+class Overview(BaseModel):
+    """High-level health of the workspace."""
+
+    total_items: int
+    by_type: dict[str, int]
+    by_status: dict[str, int]
+    coverage_percent: float
+    """Share of requirements that have at least one spec and one verification."""
+    gaps: int
+    stale: int
+
+
+class Context(BaseModel):
+    """Everything an agent needs to work on one item."""
+
+    item: Item
+    ancestors: list[Item]
+    descendants: list[Item]
+
+
+class Trace(BaseModel):
+    """Traceability chains around one item."""
+
+    item: Item
+    upstream: list[Item] = []
+    downstream: list[Item] = []
+
+
 class Service:
     """Business operations on the traceability graph, bound to one actor."""
 
@@ -91,6 +119,65 @@ class Service:
             and (needle is None or needle in item.title.lower() or needle in item.body.lower())
         ]
         return sorted(result, key=_sort_key)
+
+    def get_overview(self) -> Overview:
+        """Summarize item counts, requirement coverage and open gaps."""
+        graph = Graph(self._storage.all())
+        items = graph.items()
+        reqs = graph.items(ItemType.REQ)
+        covered = [r for r in reqs if graph.specs_for(r.id) and graph.verifications_for(r.id)]
+        gaps = self.list_gaps()
+        return Overview(
+            total_items=len(items),
+            by_type={t.value: sum(1 for i in items if i.type is t) for t in ItemType},
+            by_status={s.value: sum(1 for i in items if i.status is s) for s in Status},
+            coverage_percent=round(100 * len(covered) / len(reqs), 1) if reqs else 100.0,
+            gaps=gaps.total,
+            stale=len(gaps.stale),
+        )
+
+    def get_context(self, item_id: str, depth: int | None = None) -> Context:
+        """Return an item with its ancestor chain and everything below it.
+
+        ``depth`` limits how many levels of descendants are included (``None`` = all).
+        """
+        item = self._require(item_id)
+        graph = Graph(self._storage.all())
+        return Context(
+            item=item,
+            ancestors=graph.ancestors(item_id),
+            descendants=sorted(graph.descendants(item_id, depth), key=_sort_key),
+        )
+
+    def trace(self, item_id: str, direction: Literal["up", "down", "both"] = "both") -> Trace:
+        """Follow traceability links upstream (to the epic) and/or downstream (to verifications)."""
+        item = self._require(item_id)
+        graph = Graph(self._storage.all())
+        return Trace(
+            item=item,
+            upstream=sorted(graph.upstream(item_id), key=_sort_key) if direction != "down" else [],
+            downstream=(
+                sorted(graph.descendants(item_id), key=_sort_key) if direction != "up" else []
+            ),
+        )
+
+    def next_work(self, limit: int = 10) -> list[Item]:
+        """Approved requirements and specs that are ready to implement.
+
+        A spec is ready only when its parent requirement is itself approved or further along.
+        Results are ordered by hierarchy level, then number.
+        """
+        graph = Graph(self._storage.all())
+        ready_parent = {Status.APPROVED, Status.IMPLEMENTED, Status.VERIFIED}
+        ready: list[Item] = []
+        for item in graph.items():
+            if item.status is not Status.APPROVED or item.type not in (ItemType.REQ, ItemType.SPEC):
+                continue
+            parent = graph.get(item.parent) if item.parent else None
+            if item.type is ItemType.SPEC and (parent is None or parent.status not in ready_parent):
+                continue
+            ready.append(item)
+        return sorted(ready, key=_sort_key)[: max(limit, 0)]
 
     def list_gaps(self, scope_id: str | None = None) -> Gaps:
         """Report traceability gaps, optionally limited to ``scope_id`` and its dependents."""

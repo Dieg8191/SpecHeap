@@ -60,7 +60,7 @@ Todas pasan por el ciclo de vida (sección 6).
 | Tool | Entrada | Efecto |
 |---|---|---|
 | `create_item` | `type`, `parent_id`, `title`, `body`, `fields?` | Crea en `draft`. Valida tipo y padre (Feature→Epic, Req→Feature, Spec→Req, Verificación→Req/Spec) |
-| `update_item` | `id`, `patch`, `expected_revision` | Edita. Si el ítem estaba `approved`, vuelve a `proposed` y marca sus dependientes como `stale` |
+| `update_item` | `item_id`, `expected_revision`, `title?`, `body?` | Edita (en lugar de un `patch` genérico, para que el esquema sea explícito para el modelo). Si el ítem estaba `approved`, vuelve a `proposed` y marca sus dependientes como `stale` |
 | `propose_item` | `id` | `draft → proposed` (solicita revisión humana) |
 | `link_items` / `unlink_items` | `from_id`, `to_id`, `relation` | Relaciones: `satisfies` (Spec→Req), `verifies` (Verificación→Req/Spec). La jerarquía se expresa con `parent_id` |
 | `mark_implemented` | `id`, `evidence?` | `approved → implemented` (Req o Spec) |
