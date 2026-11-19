@@ -41,12 +41,28 @@ a network you do not trust (`--host` other than loopback prints a warning).
 The MCP server exposes 7 read tools and 7 write tools, plus resources and prompts. Approval is
 intentionally not a tool.
 
+## Web UI
+
+The UI is a React + Vite + Material UI single-page app (`frontend/`) served by a small JSON API
+(`src/specheap/web/`). The compiled app is written to `src/specheap/web/static/`, which is
+git-ignored but bundled into the Python wheel, so build it before running or releasing:
+
+```bash
+cd frontend
+npm install
+npm run build        # outputs to ../src/specheap/web/static
+```
+
+For frontend development, run `specheap serve` and, in another terminal, `npm run dev` inside
+`frontend/`: Vite hot-reloads the UI and proxies `/api` to the Python server on port 8765.
+
 ## Development
 
 ```bash
 py -3.14 -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev]"
-.venv/Scripts/python -m pytest
+.venv/Scripts/python -m pytest                 # backend tests
+cd frontend && npm test && npm run typecheck   # frontend tests and type check
 ```
 
 ## License

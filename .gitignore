@@ -1,4 +1,7 @@
 .venv/
+node_modules/
+frontend/dist/
+src/specheap/web/static/
 __pycache__/
 *.egg-info/
 .pytest_cache/

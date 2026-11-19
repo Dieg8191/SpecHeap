@@ -33,7 +33,7 @@ def test_serve_starts_uvicorn_on_loopback(
 
     assert main(["serve", "--root", str(tmp_path), "--port", "9999"]) == 0
     assert calls[0]["host"] == "127.0.0.1" and calls[0]["port"] == 9999
-    assert "warning" not in capsys.readouterr().err
+    assert "without authentication" not in capsys.readouterr().err
 
 
 def test_serve_warns_when_exposed(

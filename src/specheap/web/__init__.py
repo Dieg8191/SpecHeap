@@ -1,5 +1,5 @@
-"""Local web UI: a server-rendered adapter over the core ``Service``."""
+"""Web interface: a JSON API over the core ``Service`` plus the compiled React frontend."""
 
-from specheap.web.app import DEFAULT_ALLOWED_HOSTS, create_app
+from specheap.web.app import DEFAULT_ALLOWED_HOSTS, STATIC_DIR, create_app, frontend_built
 
-__all__ = ["DEFAULT_ALLOWED_HOSTS", "create_app"]
+__all__ = ["DEFAULT_ALLOWED_HOSTS", "STATIC_DIR", "create_app", "frontend_built"]

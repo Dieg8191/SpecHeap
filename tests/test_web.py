@@ -1,6 +1,8 @@
-"""Tests for the web UI: rendering, actions and its security boundary."""
+"""Tests for the web API, its security boundary and static hosting."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
@@ -8,9 +10,10 @@ from starlette.testclient import TestClient
 from specheap.core.models import Actor, ItemType, Status, VerificationResult
 from specheap.core.ports import Storage
 from specheap.core.service import Service
-from specheap.web import create_app
+from specheap.web import create_app, frontend_built
 
 TOKEN = "test-token"
+CSRF = {"X-CSRF-Token": TOKEN}
 
 
 @pytest.fixture
@@ -19,8 +22,18 @@ def agent(storage: Storage) -> Service:
 
 
 @pytest.fixture
-def client(storage: Storage) -> TestClient:
-    app = create_app(storage, csrf_token=TOKEN)
+def static_dir(tmp_path: Path) -> Path:
+    directory = tmp_path / "static"
+    (directory / "assets").mkdir(parents=True)
+    index = "<!doctype html><title>SpecHeap</title>"
+    (directory / "index.html").write_text(index, encoding="utf-8")
+    (directory / "assets" / "app.js").write_text("console.log('app')", encoding="utf-8")
+    return directory
+
+
+@pytest.fixture
+def client(storage: Storage, static_dir: Path) -> TestClient:
+    app = create_app(storage, csrf_token=TOKEN, static_dir=static_dir)
     return TestClient(app, base_url="http://localhost", follow_redirects=False)
 
 
@@ -37,75 +50,83 @@ def seed(agent: Service) -> None:
     agent.propose_item(req.id)
 
 
-def post(client: TestClient, path: str, **data: str) -> object:
-    return client.post(path, data={"csrf_token": TOKEN, **data})
-
-
-# ----------------------------------------------------------------- rendering
-
-
-def test_empty_workspace_renders(client: TestClient) -> None:
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "No items yet" in response.text
-
-
-def test_dashboard_shows_review_queue_gaps_and_tree(client: TestClient, agent: Service) -> None:
-    seed(agent)
-    page = client.get("/").text
-    assert "Awaiting your review (1)" in page
-    assert "REQ-001" in page and "Lock after failures" in page
-    assert "no spec" in page  # REQ-002 has no spec
-    assert "Requirements without a spec" in page
-    assert "Authentication" in page and "Counter" in page
-    assert 'action="/items/REQ-001/approve"' in page
-
-
-def test_item_page_shows_context(client: TestClient, agent: Service) -> None:
-    seed(agent)
-    page = client.get("/items/REQ-001").text
-    assert "REQ-001: Lock after failures" in page
-    assert 'href="/items/EPIC-001"' in page and 'href="/items/FEAT-001"' in page  # breadcrumbs
-    assert "SPEC-001" in page and "VER-001" in page  # children
-    assert "WHEN 3 failures, LOCK." in page
-    assert agent.get_item("REQ-001").revision in page
-
-
-def test_verification_page_shows_result(client: TestClient, agent: Service) -> None:
-    seed(agent)
-    agent.report_verification(
-        "VER-001", VerificationResult.FAIL, evidence="assertion failed", run_ref="run-7"
+def act(client: TestClient, item_id: str, action: str, headers: dict[str, str] | None = None):
+    return client.post(
+        f"/api/items/{item_id}/actions/{action}", headers=CSRF if headers is None else headers
     )
-    page = client.get("/items/VER-001").text
-    assert "fail" in page and "run-7" in page and "assertion failed" in page
 
 
-def test_unknown_or_malformed_item_is_404(client: TestClient) -> None:
-    missing = client.get("/items/REQ-099")
-    assert missing.status_code == 404 and "NOT_FOUND" in missing.text
-    malformed = client.get("/items/nope")
-    assert malformed.status_code == 404 and "VALIDATION_ERROR" in malformed.text
+# --------------------------------------------------------------------- reading
 
 
-def test_user_content_is_escaped(client: TestClient, agent: Service) -> None:
-    epic = agent.create_item(ItemType.EPIC, "<img src=x onerror=alert(1)>")
-    agent.update_item(epic.id, {"body": "<script>alert(1)</script>"}, epic.revision)
-    for path in ("/", "/items/EPIC-001"):
-        page = client.get(path).text
-        assert "<script>" not in page and "<img src=x" not in page
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in client.get("/items/EPIC-001").text
+def test_session_returns_csrf_token(client: TestClient) -> None:
+    assert client.get("/api/session").json() == {"csrf_token": TOKEN}
+
+
+def test_empty_dashboard(client: TestClient) -> None:
+    data = client.get("/api/dashboard").json()
+    assert data["items"] == []
+    assert data["overview"]["total_items"] == 0 and data["overview"]["coverage_percent"] == 100.0
+
+
+def test_dashboard_contents(client: TestClient, agent: Service) -> None:
+    seed(agent)
+    data = client.get("/api/dashboard").json()
+    assert data["overview"]["total_items"] == 6
+    assert [i["id"] for i in data["items"]][:3] == ["EPIC-001", "FEAT-001", "REQ-001"]
+    assert data["gaps"]["reqs_without_spec"] == ["REQ-002"]
+    assert data["items"][2]["revision"]
+    assert {"id", "type", "title", "status", "parent", "body"} <= data["items"][0].keys()
+
+
+def test_item_detail(client: TestClient, agent: Service) -> None:
+    seed(agent)
+    data = client.get("/api/items/REQ-001").json()
+    assert data["item"]["title"] == "Lock after failures"
+    assert [a["id"] for a in data["ancestors"]] == ["EPIC-001", "FEAT-001"]
+    assert [c["id"] for c in data["children"]] == ["SPEC-001", "VER-001"]
+    assert data["downstream"] == [] and data["targets"] == []
+    assert data["actions"] == [{"slug": "approve", "label": "Approve", "style": "primary"}]
+
+
+def test_downstream_excludes_direct_children(client: TestClient, agent: Service) -> None:
+    seed(agent)
+    agent.create_item(ItemType.VERIFICATION, "Counter test", parent_id="SPEC-001")
+    data = client.get("/api/items/REQ-001").json()
+    assert [d["id"] for d in data["downstream"]] == ["VER-002"]
+
+
+def test_verification_detail_carries_result(client: TestClient, agent: Service) -> None:
+    seed(agent)
+    agent.report_verification("VER-001", VerificationResult.FAIL, evidence="boom", run_ref="run-7")
+    item = client.get("/api/items/VER-001").json()["item"]
+    assert (item["result"], item["evidence"], item["run_ref"]) == ("fail", "boom", "run-7")
+
+
+def test_unknown_and_malformed_items_return_structured_404(client: TestClient) -> None:
+    missing = client.get("/api/items/REQ-099")
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "NOT_FOUND" and missing.json()["error"]["hint"]
+    malformed = client.get("/api/items/nope")
+    assert malformed.status_code == 400
+    assert malformed.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_unknown_api_route_is_json_404(client: TestClient) -> None:
+    response = client.get("/api/nothing/here")
+    assert response.status_code == 404 and response.json()["error"]["code"] == "NOT_FOUND"
 
 
 @pytest.mark.parametrize(
-    ("status", "expected", "absent"),
+    ("status", "expected"),
     [
-        (Status.DRAFT, "Propose for review", "Approve"),
-        (Status.PROPOSED, "Approve", "Propose for review"),
-        (Status.APPROVED, "Mark implemented", "Approve"),
+        (Status.DRAFT, ["propose"]),
+        (Status.PROPOSED, ["approve"]),
+        (Status.APPROVED, ["implement"]),
     ],
 )
-def test_actions_match_status(
-    client: TestClient, agent: Service, status: Status, expected: str, absent: str
+def test_available_actions_follow_status(
+    client: TestClient, agent: Service, status: Status, expected: list[str]
 ) -> None:
     human = Service(agent._storage, Actor.HUMAN)  # noqa: SLF001
     epic = agent.create_item(ItemType.EPIC, "E")
@@ -115,9 +136,8 @@ def test_actions_match_status(
         agent.propose_item(req.id)
     if status is Status.APPROVED:
         human.approve_item(req.id)
-    page = client.get(f"/items/{req.id}").text
-    assert f">{expected}<" in page
-    assert f">{absent}<" not in page
+    actions = client.get(f"/api/items/{req.id}").json()["actions"]
+    assert [a["slug"] for a in actions] == expected
 
 
 def test_no_actions_on_approved_epic(client: TestClient, agent: Service) -> None:
@@ -125,99 +145,139 @@ def test_no_actions_on_approved_epic(client: TestClient, agent: Service) -> None
     epic = agent.create_item(ItemType.EPIC, "E")
     agent.propose_item(epic.id)
     human.approve_item(epic.id)
-    assert "<button" not in client.get(f"/items/{epic.id}").text
+    assert client.get(f"/api/items/{epic.id}").json()["actions"] == []
 
 
-# ------------------------------------------------------------------- actions
+# --------------------------------------------------------------------- actions
 
 
-def test_approve_requires_valid_csrf_token(client: TestClient, agent: Service) -> None:
+def test_human_approves_and_response_reflects_new_state(
+    client: TestClient, agent: Service
+) -> None:
     seed(agent)
-    assert client.post("/items/REQ-001/approve").status_code == 403
-    wrong = client.post("/items/REQ-001/approve", data={"csrf_token": "nope"})
-    assert wrong.status_code == 403
-    assert agent.get_item("REQ-001").status is Status.PROPOSED
-
-
-def test_human_approves_and_is_redirected(client: TestClient, agent: Service) -> None:
-    seed(agent)
-    response = post(client, "/items/REQ-001/approve")
-    assert response.status_code == 303 and response.headers["location"] == "/items/REQ-001"  # type: ignore[attr-defined]
+    response = act(client, "REQ-001", "approve")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["item"]["status"] == "approved"
+    assert [a["slug"] for a in body["actions"]] == ["implement"]
     assert agent.get_item("REQ-001").status is Status.APPROVED
 
 
-def test_approve_from_dashboard_returns_home(client: TestClient, agent: Service) -> None:
+def test_full_lifecycle(client: TestClient, agent: Service) -> None:
     seed(agent)
-    response = post(client, "/items/REQ-001/approve", next="home")
-    assert response.headers["location"] == "/"  # type: ignore[attr-defined]
+    for action in ("propose", "approve", "implement"):
+        assert act(client, "REQ-002", action).status_code == 200
+    assert agent.get_item("REQ-002").status is Status.IMPLEMENTED
 
 
-def test_redirect_target_cannot_be_chosen_by_the_form(client: TestClient, agent: Service) -> None:
-    seed(agent)
-    response = post(client, "/items/REQ-001/approve", next="https://evil.example/")
-    assert response.headers["location"] == "/items/REQ-001"  # type: ignore[attr-defined]
-
-
-def test_invalid_transition_shows_error_and_changes_nothing(
+def test_invalid_transition_is_a_409_and_changes_nothing(
     client: TestClient, agent: Service
 ) -> None:
-    seed(agent)  # REQ-002 is a draft: it cannot be approved yet.
-    response = post(client, "/items/REQ-002/approve")
-    assert response.status_code == 409  # type: ignore[attr-defined]
-    assert "INVALID_TRANSITION" in response.text  # type: ignore[attr-defined]
+    seed(agent)  # REQ-002 is still a draft.
+    response = act(client, "REQ-002", "approve")
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_TRANSITION"
     assert agent.get_item("REQ-002").status is Status.DRAFT
-
-
-def test_full_lifecycle_through_the_ui(client: TestClient, agent: Service) -> None:
-    seed(agent)
-    post(client, "/items/REQ-002/propose")
-    post(client, "/items/REQ-002/approve")
-    post(client, "/items/REQ-002/implement")
-    assert agent.get_item("REQ-002").status is Status.IMPLEMENTED
 
 
 def test_unknown_action_and_unknown_item(client: TestClient, agent: Service) -> None:
     seed(agent)
-    assert post(client, "/items/REQ-001/delete").status_code == 404  # type: ignore[attr-defined]
-    assert post(client, "/items/REQ-099/approve").status_code == 404  # type: ignore[attr-defined]
+    assert act(client, "REQ-001", "delete").status_code == 404
+    assert act(client, "REQ-001", "delete").json()["error"]["code"] == "UNKNOWN_ACTION"
+    assert act(client, "REQ-099", "approve").status_code == 404
 
 
 def test_get_cannot_trigger_actions(client: TestClient, agent: Service) -> None:
     seed(agent)
-    assert client.get("/items/REQ-001/approve").status_code == 405
+    assert client.get("/api/items/REQ-001/actions/approve").status_code in (404, 405)
     assert agent.get_item("REQ-001").status is Status.PROPOSED
 
 
-# ------------------------------------------------------------------ security
+# -------------------------------------------------------------------- security
 
 
-def test_foreign_host_header_is_rejected(storage: Storage, agent: Service) -> None:
+@pytest.mark.parametrize("headers", [{}, {"X-CSRF-Token": "wrong"}, {"X-CSRF-Token": ""}])
+def test_actions_require_the_csrf_token(
+    client: TestClient, agent: Service, headers: dict[str, str]
+) -> None:
     seed(agent)
-    app = create_app(storage, csrf_token=TOKEN)
-    rebinding = TestClient(app, base_url="http://evil.example", follow_redirects=False)
-    assert rebinding.get("/").status_code == 400
-    assert rebinding.post(
-        "/items/REQ-001/approve", data={"csrf_token": TOKEN}
-    ).status_code == 400
+    response = act(client, "REQ-001", "approve", headers=headers)
+    assert response.status_code == 403 and response.json()["error"]["code"] == "CSRF_INVALID"
     assert agent.get_item("REQ-001").status is Status.PROPOSED
 
 
-def test_extra_allowed_hosts_are_honoured(storage: Storage) -> None:
-    app = create_app(storage, allowed_hosts=["specs.internal"], csrf_token=TOKEN)
-    ok = TestClient(app, base_url="http://specs.internal:8765")
-    assert ok.get("/").status_code == 200
-    assert TestClient(app, base_url="http://localhost").get("/").status_code == 400
+def test_form_posts_without_the_header_cannot_approve(client: TestClient, agent: Service) -> None:
+    """A classic cross-site form submission cannot set custom headers."""
+    seed(agent)
+    response = client.post("/api/items/REQ-001/actions/approve", data={"csrf_token": TOKEN})
+    assert response.status_code == 403
+    assert agent.get_item("REQ-001").status is Status.PROPOSED
+
+
+def test_foreign_host_header_is_rejected(
+    storage: Storage, agent: Service, static_dir: Path
+) -> None:
+    seed(agent)
+    app = create_app(storage, csrf_token=TOKEN, static_dir=static_dir)
+    rebinding = TestClient(app, base_url="http://evil.example", follow_redirects=False)
+    assert rebinding.get("/api/dashboard").status_code == 400
+    assert rebinding.post("/api/items/REQ-001/actions/approve", headers=CSRF).status_code == 400
+    assert agent.get_item("REQ-001").status is Status.PROPOSED
+
+
+def test_extra_allowed_hosts_are_honoured(storage: Storage, static_dir: Path) -> None:
+    app = create_app(storage, allowed_hosts=["specs.internal"], static_dir=static_dir)
+    allowed = TestClient(app, base_url="http://specs.internal:8765")
+    assert allowed.get("/api/session").status_code == 200
+    assert TestClient(app, base_url="http://localhost").get("/api/session").status_code == 400
 
 
 def test_security_headers(client: TestClient) -> None:
-    headers = client.get("/").headers
-    assert "frame-ancestors 'none'" in headers["content-security-policy"]
-    assert "script-src" not in headers["content-security-policy"]
+    headers = client.get("/api/dashboard").headers
+    csp = headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in csp and "script-src 'self'" in csp
+    assert "unsafe-eval" not in csp and "script-src 'self' 'unsafe-inline'" not in csp
     assert headers["x-frame-options"] == "DENY"
     assert headers["x-content-type-options"] == "nosniff"
 
 
-def test_random_csrf_token_is_generated_per_app(storage: Storage) -> None:
-    first = TestClient(create_app(storage), base_url="http://localhost").get("/")
-    second = TestClient(create_app(storage), base_url="http://localhost").get("/")
-    assert first.status_code == second.status_code == 200
+def test_random_csrf_token_differs_per_app(storage: Storage, static_dir: Path) -> None:
+    def token() -> str:
+        app = create_app(storage, static_dir=static_dir)
+        return TestClient(app, base_url="http://localhost").get("/api/session").json()["csrf_token"]
+
+    first, second = token(), token()
+    assert first != second and len(first) >= 32
+
+
+# --------------------------------------------------------------- static hosting
+
+
+def test_serves_index_and_assets(client: TestClient) -> None:
+    assert "<title>SpecHeap</title>" in client.get("/").text
+    assert "console.log" in client.get("/assets/app.js").text
+
+
+def test_client_side_routes_fall_back_to_index(client: TestClient) -> None:
+    response = client.get("/items/REQ-001")
+    assert response.status_code == 200 and "<title>SpecHeap</title>" in response.text
+    assert response.headers["cache-control"] == "no-cache"
+
+
+def test_static_hosting_blocks_path_traversal(
+    storage: Storage, static_dir: Path, tmp_path: Path
+) -> None:
+    (tmp_path / "secret.txt").write_text("TOP SECRET", encoding="utf-8")
+    app = create_app(storage, static_dir=static_dir)
+    client = TestClient(app, base_url="http://localhost")
+    for path in ("/../secret.txt", "/%2e%2e/secret.txt", "/assets/../../secret.txt"):
+        assert "TOP SECRET" not in client.get(path).text
+
+
+def test_missing_frontend_explains_how_to_build_it(storage: Storage, tmp_path: Path) -> None:
+    empty = tmp_path / "nothing"
+    assert not frontend_built(empty)
+    client = TestClient(create_app(storage, static_dir=empty), base_url="http://localhost")
+    response = client.get("/")
+    assert response.status_code == 503 and "npm run build" in response.text
+    assert client.get("/api/session").status_code == 200  # The API still works.

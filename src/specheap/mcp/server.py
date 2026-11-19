@@ -16,12 +16,13 @@ from typing import Any, Literal
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from specheap import __version__
 from specheap.core.errors import SpecHeapError, ValidationFailedError
 from specheap.core.models import Actor, Item, ItemType, Status, VerificationResult
-from specheap.core.service import Context, Gaps, Overview, Relation, Service
+from specheap.core.schemas import ContextDTO, ItemDTO, TraceDTO, context_dto, to_dtos
+from specheap.core.service import Gaps, Overview, Relation, Service
 
 INSTRUCTIONS = """\
 SpecHeap stores a Spec-Driven Development graph: Epic > Feature > Requirement > Spec > \
@@ -34,53 +35,12 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
 
-class ItemDTO(BaseModel):
-    """An item as seen by agents, including its concurrency token."""
-
-    id: str
-    type: ItemType
-    title: str
-    status: Status
-    parent: str | None
-    body: str
-    satisfies: list[str]
-    verifies: list[str]
-    result: VerificationResult | None
-    evidence: str
-    run_ref: str | None
-    revision: str
-
-    @classmethod
-    def from_item(cls, item: Item) -> "ItemDTO":
-        return cls(**item.model_dump(), revision=item.revision)
-
-
 class ItemList(BaseModel):
     """A page of items."""
 
     items: list[ItemDTO]
     total: int
     next_cursor: str | None = None
-
-
-class ContextDTO(BaseModel):
-    """An item with its ancestors and descendants."""
-
-    item: ItemDTO
-    ancestors: list[ItemDTO]
-    descendants: list[ItemDTO]
-
-
-class TraceDTO(BaseModel):
-    """Traceability chains around an item."""
-
-    item: ItemDTO
-    upstream: list[ItemDTO] = Field(default_factory=list)
-    downstream: list[ItemDTO] = Field(default_factory=list)
-
-
-def _dtos(items: list[Item]) -> list[ItemDTO]:
-    return [ItemDTO.from_item(i) for i in items]
 
 
 def _guard(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -142,7 +102,7 @@ def build_server(service: Service) -> MCPServer:
         page = found[offset : offset + size]
         more = offset + size < len(found)
         return ItemList(
-            items=_dtos(page), total=len(found), next_cursor=str(offset + size) if more else None
+            items=to_dtos(page), total=len(found), next_cursor=str(offset + size) if more else None
         )
 
     @read_tool
@@ -155,7 +115,7 @@ def build_server(service: Service) -> MCPServer:
         """Best first call when working on an item: its ancestor chain up to the epic plus all
         descendants (requirements, specs, verifications) with their status.
         depth limits descendant levels."""
-        return _context_dto(service.get_context(item_id, depth))
+        return context_dto(service.get_context(item_id, depth))
 
     @read_tool
     def trace(item_id: str, direction: Literal["up", "down", "both"] = "both") -> TraceDTO:
@@ -163,8 +123,8 @@ def build_server(service: Service) -> MCPServer:
         result = service.trace(item_id, direction)
         return TraceDTO(
             item=ItemDTO.from_item(result.item),
-            upstream=_dtos(result.upstream),
-            downstream=_dtos(result.downstream),
+            upstream=to_dtos(result.upstream),
+            downstream=to_dtos(result.downstream),
         )
 
     @read_tool
@@ -177,7 +137,7 @@ def build_server(service: Service) -> MCPServer:
     def next_work(limit: int = 10) -> ItemList:
         """Approved requirements and specs that are ready to implement."""
         items = service.next_work(limit)
-        return ItemList(items=_dtos(items), total=len(items))
+        return ItemList(items=to_dtos(items), total=len(items))
 
     # ----------------------------------------------------------- write tools
 
@@ -249,14 +209,6 @@ def build_server(service: Service) -> MCPServer:
     return server
 
 
-def _context_dto(context: Context) -> ContextDTO:
-    return ContextDTO(
-        item=ItemDTO.from_item(context.item),
-        ancestors=_dtos(context.ancestors),
-        descendants=_dtos(context.descendants),
-    )
-
-
 def _parse_cursor(cursor: str | None) -> int:
     if cursor is None:
         return 0
@@ -310,7 +262,7 @@ def _register_resources(server: MCPServer, service: Service) -> None:
     @guarded
     def feature_context_resource(item_id: str) -> str:
         """A feature with its ancestors and descendants as JSON (same as get_context)."""
-        return _context_dto(service.get_context(item_id)).model_dump_json(indent=2)
+        return context_dto(service.get_context(item_id)).model_dump_json(indent=2)
 
     @server.resource("specheap://{item_type}/{item_id}", mime_type="text/markdown")
     @guarded

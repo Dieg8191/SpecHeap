@@ -100,8 +100,14 @@ _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 def _serve(storage: FileSystemStorage, args: argparse.Namespace) -> int:
     import uvicorn
 
-    from specheap.web import DEFAULT_ALLOWED_HOSTS, create_app
+    from specheap.web import DEFAULT_ALLOWED_HOSTS, create_app, frontend_built
 
+    if not frontend_built():
+        print(
+            "warning: the frontend is not built; only the API is available. "
+            "Run 'npm install && npm run build' in frontend/.",
+            file=sys.stderr,
+        )
     allowed = [*DEFAULT_ALLOWED_HOSTS, args.host, *args.allowed_host]
     if args.host not in _LOOPBACK_HOSTS:
         print(
