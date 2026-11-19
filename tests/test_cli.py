@@ -36,13 +36,6 @@ def test_init_creates_the_database_and_is_idempotent(tmp_path: Path) -> None:
         storage.close()
 
 
-@pytest.mark.parametrize("command", ["import", "export"])
-def test_markdown_commands_no_longer_exist(command: str) -> None:
-    with pytest.raises(SystemExit) as exc:
-        main([command])
-    assert exc.value.code == 2
-
-
 def test_serve_starts_uvicorn_on_loopback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

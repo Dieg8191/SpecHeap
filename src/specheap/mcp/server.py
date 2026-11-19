@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from specheap import __version__
 from specheap.core.errors import SpecHeapError, ValidationFailedError
-from specheap.core.models import Actor, Item, ItemType, Status, VerificationResult
+from specheap.core.models import Actor, ItemType, Status, VerificationResult
 from specheap.core.schemas import ContextDTO, ItemDTO, TraceDTO, context_dto, to_dtos
 from specheap.core.service import Gaps, Overview, Relation, Service
 
@@ -225,19 +225,6 @@ def _parse_cursor(cursor: str | None) -> int:
     return int(cursor)
 
 
-def _item_markdown(item: Item) -> str:
-    links = []
-    if item.satisfies:
-        links.append(f"satisfies: {', '.join(item.satisfies)}")
-    if item.verifies:
-        links.append(f"verifies: {', '.join(item.verifies)}")
-    meta = " | ".join(
-        [f"status: {item.status.value}", f"parent: {item.parent or '-'}", *links,
-         f"revision: {item.revision}"]
-    )
-    return f"# {item.id}: {item.title}\n\n{meta}\n\n{item.body}"
-
-
 # ---------------------------------------------------------------- resources
 
 
@@ -264,17 +251,17 @@ def _register_resources(server: MCPServer, service: Service) -> None:
         """A feature with its ancestors and descendants as JSON (same as get_context)."""
         return context_dto(service.get_context(item_id)).model_dump_json(indent=2)
 
-    @server.resource("specheap://{item_type}/{item_id}", mime_type="text/markdown")
+    @server.resource("specheap://{item_type}/{item_id}", mime_type="application/json")
     @guarded
     def item_resource(item_type: str, item_id: str) -> str:
-        """An item rendered as markdown."""
+        """An item as JSON (same as get_item)."""
         item = service.get_item(item_id)
         if item.type.value != item_type:
             raise ValidationFailedError(
                 f"{item_id} is a {item.type.value}, not a {item_type}.",
                 hint=f"Use specheap://{item.type.value}/{item_id}.",
             )
-        return _item_markdown(item)
+        return ItemDTO.from_item(item).model_dump_json(indent=2)
 
 
 # ------------------------------------------------------------------ prompts

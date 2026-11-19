@@ -16,7 +16,7 @@ El MCP permite que modelos de IA consulten y modifiquen ese grafo. Los humanos u
 
 1. **La IA propone, el humano aprueba.** El MCP nunca puede aprobar.
 2. **Pocas tools, orientadas a tareas** (~12). Cada tool extra consume contexto del modelo.
-3. **Salida doble:** `structuredContent` (JSON validado con Pydantic) más un resumen corto en markdown.
+3. **Salida estructurada:** `structuredContent` con JSON validado con Pydantic.
 4. **Errores accionables:** código, causa y siguiente paso sugerido.
 5. **Concurrencia optimista:** cada ítem tiene `revision` (hash del contenido). `update_item` la exige para no pisar ediciones humanas.
 6. **Auditoría:** cada escritura se registra en la tabla `audit_log` de la base de datos (`.specheap/specheap.db`) con `actor`, acción, id y timestamp.
@@ -88,7 +88,7 @@ Regla de integridad: todo Req debe tener ≥1 Spec y ≥1 Verificación para con
 
 **Resources**
 - `specheap://overview`
-- `specheap://{type}/{id}`: ítem como markdown
+- `specheap://{type}/{id}`: ítem como JSON (igual que `get_item`)
 - `specheap://feature/{id}/context`: equivalente a `get_context`
 
 **Prompts**

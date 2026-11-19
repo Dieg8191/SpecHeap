@@ -201,7 +201,9 @@ def test_resources_and_prompts(storage: Storage) -> None:
 
     out = run_with_client(storage, scenario)
     assert json.loads(out["overview"])["total_items"] == 2
-    assert out["item"].startswith("# EPIC-001: Auth") and "Users can sign in." in out["item"]
+    item = json.loads(out["item"])
+    assert item["id"] == "EPIC-001" and item["title"] == "Auth"
+    assert item["body"] == "Users can sign in." and item["revision"]
     assert json.loads(out["context"])["ancestors"][0]["id"] == "EPIC-001"
     assert out["prompts"] == {
         "decompose_feature",
