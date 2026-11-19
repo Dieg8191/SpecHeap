@@ -10,25 +10,12 @@ import pytest
 from specheap.core.models import Actor
 from specheap.core.ports import Storage
 from specheap.core.service import Service
-from specheap.storage import FileSystemStorage, MemoryStorage, SQLiteStorage
-
-
-@pytest.fixture(params=["memory", "fs", "sqlite"])
-def storage(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Storage]:
-    """Run every storage-dependent test against every adapter."""
-    if request.param == "memory":
-        yield MemoryStorage()
-    elif request.param == "fs":
-        yield FileSystemStorage(tmp_path)
-    else:
-        sqlite = SQLiteStorage(tmp_path / "specheap.db")
-        yield sqlite
-        sqlite.close()
+from specheap.storage import MemoryStorage, SQLiteStorage
 
 
 @pytest.fixture(params=["memory", "sqlite"])
-def atomic_storage(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Storage]:
-    """Adapters that guarantee atomic transactions (the file adapter does not)."""
+def storage(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Storage]:
+    """Run every storage-dependent test against every adapter."""
     if request.param == "memory":
         yield MemoryStorage()
     else:

@@ -1,6 +1,5 @@
 # Runtime dependencies. Keep in sync with [project.dependencies] in pyproject.toml.
 pydantic>=2.7,<3
-pyyaml>=6
 mcp>=2,<3
 starlette>=1,<2
 uvicorn>=0.30

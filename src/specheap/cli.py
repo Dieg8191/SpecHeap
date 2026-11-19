@@ -17,8 +17,7 @@ from specheap.core.errors import SpecHeapError
 from specheap.core.models import Actor
 from specheap.core.ports import Storage
 from specheap.core.service import Service
-from specheap.storage import FileSystemStorage, SQLiteStorage, project_database_path
-from specheap.storage.migrate import export_workspace, import_workspace
+from specheap.storage import SQLiteStorage, project_database_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,20 +54,6 @@ def build_parser() -> argparse.ArgumentParser:
     gaps = sub.add_parser("gaps", help="List traceability gaps.")
     add_root(gaps)
     gaps.add_argument("--scope", default=None, help="Limit to an item and its dependents.")
-
-    import_cmd = sub.add_parser(
-        "import", help="Import an old markdown workspace (.specheap/*/*.md) into the database."
-    )
-    add_root(import_cmd)
-    import_cmd.add_argument(
-        "--replace", action="store_true", help="Overwrite a database that already has items."
-    )
-
-    export = sub.add_parser("export", help="Write a markdown copy of the workspace.")
-    add_root(export)
-    export.add_argument(
-        "--out", default="specheap-export", help="Directory to write to (default: specheap-export)."
-    )
     return parser
 
 
@@ -77,13 +62,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = Path(args.root)
     try:
         if args.command == "init":
-            return _init(root)
-        if args.command == "import":
-            return _import(root, replace=args.replace)
+            storage = SQLiteStorage.for_project(root)
+            storage.close()
+            print(f"Initialized {project_database_path(root)}")
+            return 0
 
         database = project_database_path(root)
         if not database.is_file():
-            return _missing_workspace(root)
+            print(
+                f"error: no workspace in {root.resolve()}. Run 'specheap init' first.",
+                file=sys.stderr,
+            )
+            return 2
         storage = SQLiteStorage(database)
         try:
             return _run(args, storage)
@@ -104,8 +94,6 @@ def _run(args: argparse.Namespace, storage: SQLiteStorage) -> int:
         return 0
     if args.command == "serve":
         return _serve(storage, args)
-    if args.command == "export":
-        return _export(storage, Path(args.root), Path(args.out))
     service = Service(storage, Actor.HUMAN)
     if args.command == "approve":
         item = service.approve_item(args.item_id)
@@ -114,63 +102,6 @@ def _run(args: argparse.Namespace, storage: SQLiteStorage) -> int:
     if args.command == "gaps":
         return _print_gaps(service, args.scope)
     return 2
-
-
-def _missing_workspace(root: Path) -> int:
-    if FileSystemStorage(root).has_items():
-        print(
-            f"error: {root.resolve()} uses the old markdown format. "
-            "Run 'specheap import' to move it to the database.",
-            file=sys.stderr,
-        )
-    else:
-        print(
-            f"error: no workspace in {root.resolve()}. Run 'specheap init' first.", file=sys.stderr
-        )
-    return 2
-
-
-def _init(root: Path) -> int:
-    storage = SQLiteStorage.for_project(root)
-    storage.close()
-    print(f"Initialized {project_database_path(root)}")
-    if FileSystemStorage(root).has_items():
-        print("Found markdown items from an older version: run 'specheap import' to load them.")
-    return 0
-
-
-def _import(root: Path, *, replace: bool) -> int:
-    source = FileSystemStorage(root)
-    if not source.has_items():
-        print(f"error: no markdown workspace found in {root.resolve()}.", file=sys.stderr)
-        return 2
-    target = SQLiteStorage.for_project(root)
-    try:
-        result = import_workspace(source, target, replace=replace)
-    finally:
-        target.close()
-    print(
-        f"Imported {result.items} items and {result.log_entries} audit entries into "
-        f"{project_database_path(root)}."
-    )
-    print("The markdown files were left untouched; delete them once you have checked the data.")
-    return 0
-
-
-def _export(storage: Storage, root: Path, out: Path) -> int:
-    destination = FileSystemStorage(out)
-    if destination.data_dir.resolve() == project_database_path(root).parent.resolve():
-        print(
-            "error: --out must be a different directory than the workspace itself.",
-            file=sys.stderr,
-        )
-        return 2
-    result = export_workspace(storage, destination)
-    print(
-        f"Exported {result.items} items and {result.log_entries} audit entries to "
-        f"{destination.data_dir}. This is a snapshot: the database remains the source of truth."
-    )
-    return 0
 
 
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")

@@ -90,14 +90,6 @@ def test_a_file_that_is_not_a_database_is_a_clear_error(db_path: Path) -> None:
     assert exc.value.code == "STORAGE_ERROR" and str(db_path) in exc.value.message
 
 
-def test_clear_removes_everything(sqlite_storage: SQLiteStorage) -> None:
-    sqlite_storage.save(epic(1))
-    sqlite_storage.append_log({"action": "x"})
-    sqlite_storage.clear()
-    assert sqlite_storage.all() == [] and sqlite_storage.log_entries() == []
-    assert sqlite_storage.next_number(ItemType.EPIC) == 1
-
-
 # ---------------------------------------------------------------- isolation
 
 

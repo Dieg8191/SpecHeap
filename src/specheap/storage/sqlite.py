@@ -261,14 +261,6 @@ class SQLiteStorage:
             ).fetchone()
         return int(row[0])
 
-    def clear(self) -> None:
-        """Delete every item, link and audit entry (used by ``import --replace``)."""
-        with self.transaction():
-            conn = self._conn()
-            conn.execute("DELETE FROM links")
-            conn.execute("DELETE FROM items")
-            conn.execute("DELETE FROM audit_log")
-
     # -------------------------------------------------------------- audit log
 
     def append_log(self, entry: dict[str, Any]) -> None:

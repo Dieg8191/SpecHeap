@@ -5,11 +5,10 @@ only source of truth. This document explains the design and the guarantees calle
 
 ## Why SQLite
 
-The first versions stored one markdown file per item. That is easy to read but cannot give
-atomic multi-item updates, safe identifier allocation across processes, or fast graph queries.
-SQLite gives all three with no server, ships with Python, and fits the local-first goal. Git
-based review of specs was deliberately dropped in favor of these guarantees; a versioning model
-is planned instead (see below).
+A workspace needs atomic multi-item updates, safe identifier allocation across processes (the MCP
+server, the web UI and the CLI run side by side) and fast graph queries. SQLite provides all of
+that with no server, ships with Python, and fits the local-first goal. Reviewing specs through
+git diffs is deliberately not a goal; a versioning model is planned instead (see below).
 
 ## Schema (version 1)
 
@@ -60,27 +59,12 @@ The version lives in `PRAGMA user_version`. On open:
 To change the schema, add a new entry to `_MIGRATIONS`, bump `SCHEMA_VERSION` and add a test that
 opens a database created with the previous version.
 
-## Import and export
-
-- `specheap import` reads an old markdown workspace and copies it into the database in a single
-  transaction, together with its audit log, and records an `import` entry. The source is parsed
-  completely first, so a corrupt file aborts the import without changing the database. It refuses
-  to run on a database that already has items unless `--replace` is given. The markdown files are
-  never modified.
-- `specheap export --out DIR` writes a markdown copy (one file per item plus `log.jsonl`). The
-  output is deterministic: importing and exporting a workspace reproduces the original files
-  byte for byte. It is a snapshot; edits made to the exported files are not read back unless you
-  import them.
-
-The markdown adapter (`storage/fs.py`) now exists only for these two commands. It is not atomic
-and should not serve live traffic.
-
 ## Backups
 
 The database file can be copied while no process is writing. To take a consistent copy while
-SpecHeap is running, use `specheap export` or SQLite's online backup (`sqlite3 specheap.db
-".backup copy.db"`). Besides `specheap.db`, WAL mode creates `specheap.db-wal` and
-`specheap.db-shm` next to it while the database is open; they belong to the same database.
+SpecHeap is running, use SQLite's online backup (`sqlite3 specheap.db ".backup copy.db"`).
+Besides `specheap.db`, WAL mode creates `specheap.db-wal` and `specheap.db-shm` next to it while
+the database is open; they belong to the same database.
 
 ## Planned: item history
 

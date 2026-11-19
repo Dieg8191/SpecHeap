@@ -19,8 +19,6 @@ specheap mcp                  # run the MCP server over stdio (add --readonly fo
 specheap serve                # local web UI at http://127.0.0.1:8765 (review queue, tree, approval)
 specheap approve REQ-001      # humans approve; agents can only propose
 specheap gaps                 # list traceability gaps
-specheap import               # load an old markdown workspace (.specheap/*/*.md) into the database
-specheap export --out DIR     # write a markdown snapshot of the workspace
 ```
 
 ## Storage
@@ -36,10 +34,7 @@ own process:
 - Every change, including the ones the system derives, is recorded in the `audit_log` table.
 - The schema is versioned (`PRAGMA user_version`), so future releases can migrate it.
 
-Workspaces created by earlier versions stored one markdown file per item: run `specheap import`
-once to move them into the database (the markdown files are left untouched). `specheap export`
-produces a readable markdown copy for inspection or backup; it is a snapshot, not a second
-source of truth. See [docs/storage.md](docs/storage.md) for the schema and the design notes.
+See [docs/storage.md](docs/storage.md) for the schema and the design notes.
 
 Connect an MCP client (for example Claude Code) by running the server from your project:
 
